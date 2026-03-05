@@ -1,12 +1,10 @@
 services:
   - type: web
     name: telegram-support-bot
-    runtime: python
+    env: docker
     plan: free
     region: frankfurt
-    pythonVersion: 3.11.0  # Добавить эту строку
-    buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /healthcheck
     envVars:
       - key: BOT_TOKEN
