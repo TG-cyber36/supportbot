@@ -5,81 +5,62 @@ from aiogram.types import Message
 from aiogram.filters import Command
 import os
 import sys
-from keep_alive import PingService  # Импортируем наш пингер
+from aiohttp import web  # Добавляем aiohttp для health check
 
 # Настройки из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 ADMIN_CHAT_ID = os.getenv('ADMIN_CHAT_ID')
+PORT = int(os.getenv('PORT', 10000))  # Render присваивает порт автоматически
 
 # Проверка настроек
-if not BOT_TOKEN:
-    print("❌ Ошибка: Нет BOT_TOKEN!")
-    sys.exit(1)
-if not ADMIN_CHAT_ID:
-    print("❌ Ошибка: Нет ADMIN_CHAT_ID!")
+if not BOT_TOKEN or not ADMIN_CHAT_ID:
+    print("❌ Ошибка: Не все переменные окружения установлены!")
     sys.exit(1)
 
-try:
-    ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
-except ValueError:
-    print("❌ Ошибка: ADMIN_CHAT_ID должен быть числом!")
-    sys.exit(1)
+ADMIN_CHAT_ID = int(ADMIN_CHAT_ID)
 
 # Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Инициализация бота и диспетчера
-bot = Bot(token=BOT_TOKEN)
+# Инициализация бота
+bot = Bot(token=BTOKEN)
 dp = Dispatcher()
-
-# Запускаем сервис пинга
-pinger = PingService(BOT_TOKEN)
-pinger.start()
 
 # Хранилище связей
 user_messages = {}
 
+# Создаем aiohttp приложение для health check
+app = web.Application()
+
+async def health_check(request):
+    """Эндпоинт для проверки здоровья"""
+    return web.Response(text="OK", status=200)
+
+app.router.add_get('/healthcheck', health_check)
+app.router.add_get('/', health_check)  # На всякий случай
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    """Обработчик команды /start"""
     await message.answer(
         "👋 Привет! Я бот поддержки.\n"
         "Напишите ваш вопрос, и я передам его администратору."
     )
-    logger.info(f"Пользователь {message.from_user.id} запустил бота")
-
-@dp.message(Command("ping"))
-async def cmd_ping(message: Message):
-    """Команда для проверки работы бота"""
-    await message.answer("🏓 Pong! Бот работает")
-
-@dp.message(Command("stats"))
-async def cmd_stats(message: Message):
-    """Статистика для администратора"""
-    if message.chat.id == ADMIN_CHAT_ID:
-        await message.answer(f"📊 Активных диалогов: {len(user_messages)}")
 
 @dp.message()
 async def handle_messages(message: Message):
     """Обработчик всех сообщений"""
     chat_id = message.chat.id
     
-    # Сообщение от администратора
     if chat_id == ADMIN_CHAT_ID:
         await handle_admin_message(message)
     else:
-        # Сообщение от пользователя
         await handle_user_message(message)
 
 async def handle_user_message(message: Message):
     """Обработка сообщений от пользователей"""
     user = message.from_user
     
-    # Формируем информацию о пользователе
     user_info = (
         f"📨 <b>НОВОЕ СООБЩЕНИЕ</b>\n"
         f"{'─' * 30}\n"
@@ -87,37 +68,25 @@ async def handle_user_message(message: Message):
         f"<b>ID:</b> <code>{user.id}</code>\n"
         f"<b>Username:</b> @{user.username or 'нет'}\n"
         f"{'─' * 30}\n"
-        f"<b>Текст:</b> {message.text or '📎 Медиафайл'}"
+        f"{message.text or '📎 Медиафайл'}"
     )
     
     try:
-        # Отправляем информацию админу
-        admin_msg = await bot.send_message(
-            ADMIN_CHAT_ID, 
-            user_info, 
-            parse_mode='HTML'
-        )
-        
-        # Сохраняем связь
+        admin_msg = await bot.send_message(ADMIN_CHAT_ID, user_info, parse_mode='HTML')
         user_messages[admin_msg.message_id] = user.id
         
-        # Если есть медиа, пересылаем
         if message.photo:
             await bot.send_photo(ADMIN_CHAT_ID, message.photo[-1].file_id)
-        elif message.document:
-            await bot.send_document(ADMIN_CHAT_ID, message.document.file_id)
         
-        # Подтверждение пользователю
         await message.answer("✅ Сообщение отправлено администратору. Ожидайте ответа.")
         logger.info(f"Сообщение от {user.id} переслано админу")
         
     except Exception as e:
-        logger.error(f"Ошибка при отправке админу: {e}")
+        logger.error(f"Ошибка: {e}")
         await message.answer("❌ Ошибка при отправке. Попробуйте позже.")
 
 async def handle_admin_message(message: Message):
     """Обработка сообщений от администратора"""
-    
     if message.reply_to_message:
         original_msg_id = message.reply_to_message.message_id
         
@@ -125,38 +94,33 @@ async def handle_admin_message(message: Message):
             user_id = user_messages[original_msg_id]
             
             try:
-                reply_text = f"📝 <b>Ответ администратора:</b>\n\n{message.text}" if message.text else "📎 Ответ с медиафайлом"
-                
-                await bot.send_message(
-                    user_id,
-                    reply_text,
-                    parse_mode='HTML'
-                )
-                
+                reply_text = f"📝 <b>Ответ администратора:</b>\n\n{message.text}"
+                await bot.send_message(user_id, reply_text, parse_mode='HTML')
                 await message.reply("✅ Ответ отправлен пользователю")
-                logger.info(f"Ответ отправлен пользователю {user_id}")
-                
             except Exception as e:
-                await message.reply(f"❌ Ошибка при отправке: {e}")
-        else:
-            await message.reply("❌ Не могу найти пользователя")
+                await message.reply(f"❌ Ошибка: {e}")
 
-async def main():
-    """Запуск бота"""
-    logger.info("🚀 Запуск бота...")
-    
+async def run_bot():
+    """Запуск бота и веб-сервера параллельно"""
     # Удаляем вебхук
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем поллинг
-    await dp.start_polling(bot)
+    # Запускаем поллинг бота
+    asyncio.create_task(dp.start_polling(bot))
+    
+    # Запускаем веб-сервер для health check
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', PORT)
+    await site.start()
+    
+    logger.info(f"🚀 Бот запущен на порту {PORT}")
+    
+    # Держим сервер запущенным
+    await asyncio.Event().wait()
 
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        asyncio.run(run_bot())
     except KeyboardInterrupt:
         logger.info("⏹ Бот остановлен")
-        pinger.stop()
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
-        pinger.stop()
