@@ -5,6 +5,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 import os
 import sys
+from keep_alive import PingService  # Импортируем наш пингер
 
 # Настройки из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -35,9 +36,12 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище связей (в памяти)
-user_messages = {}  # message_id -> user_id
-user_chats = {}     # user_id -> last_message_id
+# Запускаем сервис пинга
+pinger = PingService(BOT_TOKEN)
+pinger.start()
+
+# Хранилище связей
+user_messages = {}
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
@@ -50,15 +54,21 @@ async def cmd_start(message: Message):
 
 @dp.message(Command("ping"))
 async def cmd_ping(message: Message):
-    """Команда для пинга бота"""
+    """Команда для проверки работы бота"""
     await message.answer("🏓 Pong! Бот работает")
+
+@dp.message(Command("stats"))
+async def cmd_stats(message: Message):
+    """Статистика для администратора"""
+    if message.chat.id == ADMIN_CHAT_ID:
+        await message.answer(f"📊 Активных диалогов: {len(user_messages)}")
 
 @dp.message()
 async def handle_messages(message: Message):
     """Обработчик всех сообщений"""
     chat_id = message.chat.id
     
-    # Сообщение от администратора (из группы)
+    # Сообщение от администратора
     if chat_id == ADMIN_CHAT_ID:
         await handle_admin_message(message)
     else:
@@ -76,7 +86,6 @@ async def handle_user_message(message: Message):
         f"<b>От:</b> {user.full_name}\n"
         f"<b>ID:</b> <code>{user.id}</code>\n"
         f"<b>Username:</b> @{user.username or 'нет'}\n"
-        f"<b>Ссылка:</b> tg://user?id={user.id}\n"
         f"{'─' * 30}\n"
         f"<b>Текст:</b> {message.text or '📎 Медиафайл'}"
     )
@@ -91,21 +100,12 @@ async def handle_user_message(message: Message):
         
         # Сохраняем связь
         user_messages[admin_msg.message_id] = user.id
-        user_chats[user.id] = admin_msg.message_id
         
         # Если есть медиа, пересылаем
         if message.photo:
             await bot.send_photo(ADMIN_CHAT_ID, message.photo[-1].file_id)
         elif message.document:
             await bot.send_document(ADMIN_CHAT_ID, message.document.file_id)
-        elif message.video:
-            await bot.send_video(ADMIN_CHAT_ID, message.video.file_id)
-        elif message.audio:
-            await bot.send_audio(ADMIN_CHAT_ID, message.audio.file_id)
-        elif message.voice:
-            await bot.send_voice(ADMIN_CHAT_ID, message.voice.file_id)
-        elif message.sticker:
-            await bot.send_sticker(ADMIN_CHAT_ID, message.sticker.file_id)
         
         # Подтверждение пользователю
         await message.answer("✅ Сообщение отправлено администратору. Ожидайте ответа.")
@@ -118,44 +118,34 @@ async def handle_user_message(message: Message):
 async def handle_admin_message(message: Message):
     """Обработка сообщений от администратора"""
     
-    # Проверяем, является ли сообщение ответом
     if message.reply_to_message:
         original_msg_id = message.reply_to_message.message_id
         
-        # Ищем пользователя
         if original_msg_id in user_messages:
             user_id = user_messages[original_msg_id]
             
-            # Получаем текст ответа
-            reply_text = f"📝 <b>Ответ администратора:</b>\n\n{message.text}" if message.text else "📎 Ответ с медиафайлом"
-            
             try:
-                # Отправляем ответ пользователю
+                reply_text = f"📝 <b>Ответ администратора:</b>\n\n{message.text}" if message.text else "📎 Ответ с медиафайлом"
+                
                 await bot.send_message(
                     user_id,
                     reply_text,
                     parse_mode='HTML'
                 )
                 
-                # Подтверждение админу
                 await message.reply("✅ Ответ отправлен пользователю")
                 logger.info(f"Ответ отправлен пользователю {user_id}")
                 
             except Exception as e:
-                error_msg = f"❌ Ошибка при отправке: {e}"
-                await message.reply(error_msg)
-                logger.error(f"Ошибка отправки ответа: {e}")
+                await message.reply(f"❌ Ошибка при отправке: {e}")
         else:
-            await message.reply("❌ Не могу найти пользователя для этого сообщения")
-    else:
-        # Игнорируем обычные сообщения в группе
-        pass
+            await message.reply("❌ Не могу найти пользователя")
 
 async def main():
     """Запуск бота"""
-    logger.info("Запуск бота...")
+    logger.info("🚀 Запуск бота...")
     
-    # Удаляем вебхук (на всякий случай)
+    # Удаляем вебхук
     await bot.delete_webhook(drop_pending_updates=True)
     
     # Запускаем поллинг
@@ -165,6 +155,8 @@ if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Бот остановлен")
+        logger.info("⏹ Бот остановлен")
+        pinger.stop()
     except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
+        logger.error(f"❌ Критическая ошибка: {e}")
+        pinger.stop()
