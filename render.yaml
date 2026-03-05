@@ -1,11 +1,12 @@
 services:
-  - type: worker
+  - type: web                          # Меняем worker на web
     name: telegram-support-bot
     runtime: python
-    plan: free
-    region: frankfurt  # или frankfurt, singapore, ohio
+    plan: free                          # Бесплатный план
+    region: frankfurt
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
+    healthCheckPath: /healthcheck       # Обязательно для web service
     envVars:
       - key: BOT_TOKEN
         sync: false
