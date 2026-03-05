@@ -6,6 +6,7 @@ services:
     region: frankfurt
     dockerfilePath: ./Dockerfile
     healthCheckPath: /healthcheck
+    # Эти переменные будут доступны в контейнере
     envVars:
       - key: BOT_TOKEN
         sync: false
