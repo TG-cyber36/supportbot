@@ -204,7 +204,10 @@ async def main():
     # Получаем информацию о боте
     me = await bot.get_me()
     logger.info(f"Бот @{me.username} запущен")
-      asyncio.create_task(run_web_server())
+    
+    # Запускаем HTTP сервер для health checks
+    asyncio.create_task(run_web_server())
+    
     # Отправляем приветственное сообщение в группу админа
     try:
         await bot.send_message(
@@ -220,7 +223,6 @@ async def main():
     except Exception as e:
         logger.error(f"Не удалось отправить приветствие в группу: {e}")
         logger.error("Убедитесь, что бот добавлен в группу и имеет права на отправку сообщений")
-        await dp.start_polling(bot)
     
     # Запускаем поллинг
     await dp.start_polling(bot)
