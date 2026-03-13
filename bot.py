@@ -5,6 +5,28 @@ from aiogram.types import Message
 from aiogram.filters import Command
 import os
 import sys
+import aiohttp
+from aiohttp import web
+
+
+# ==================== HEALTH-CHECK ЭНДПОИНТ ====================
+async def handle_health(request):
+    """Health check endpoint для Render и внешних сервисов"""
+    return web.Response(text="Bot is running!")
+
+async def run_web_server():
+    """Запускает HTTP сервер для health checks"""
+    port = int(os.getenv("PORT", 10000))  # Render сам дает порт
+    app = web.Application()
+    app.router.add_get('/', handle_health)      # корневой URL
+    app.router.add_get('/health', handle_health) # /health
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logging.info(f"⚡ HTTP сервер слушает порт {port}")
+
+
 
 # Настройки из переменных окружения
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -182,7 +204,7 @@ async def main():
     # Получаем информацию о боте
     me = await bot.get_me()
     logger.info(f"Бот @{me.username} запущен")
-    
+      asyncio.create_task(run_web_server())
     # Отправляем приветственное сообщение в группу админа
     try:
         await bot.send_message(
@@ -198,6 +220,7 @@ async def main():
     except Exception as e:
         logger.error(f"Не удалось отправить приветствие в группу: {e}")
         logger.error("Убедитесь, что бот добавлен в группу и имеет права на отправку сообщений")
+        await dp.start_polling(bot)
     
     # Запускаем поллинг
     await dp.start_polling(bot)
